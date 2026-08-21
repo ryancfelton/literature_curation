@@ -13,6 +13,16 @@ st.set_page_config(page_title="arXiv Literature Curation", layout="wide")
 st.title("🌌 Earth & Planetary Astrophysics AI/ML Literature Curation")
 st.markdown("Curated papers from `astro-ph.EP` utilizing AI/ML approaches (2023–2026).")
 
+# Sidebar settings
+st.sidebar.header("Search Configuration")
+papers_per_year = st.sidebar.slider(
+    "Publications per year",
+    min_value=1,
+    max_value=100,
+    value=10,
+    step=1
+)
+
 def extract_keywords(abstract):
     ai_keywords = {
         "machine learning": "Machine Learning",
@@ -41,7 +51,7 @@ def extract_keywords(abstract):
         found.extend(["Machine Learning", "Data Science"])
     return list(dict.fromkeys(found))[:4]
 
-def fetch_arxiv_data():
+def fetch_arxiv_data(limit_per_year):
     client = arxiv.Client()
     ai_terms = '(ti:"machine learning" OR ab:"machine learning" OR ti:"neural network" OR ab:"neural network" OR ti:"deep learning" OR ab:"deep learning" OR ti:"artificial intelligence" OR ab:"artificial intelligence")'
     
@@ -54,7 +64,7 @@ def fetch_arxiv_data():
         
         search = arxiv.Search(
             query=query,
-            max_results=20,
+            max_results=limit_per_year * 2,
             sort_by=arxiv.SortCriterion.SubmittedDate
         )
         
@@ -76,7 +86,7 @@ def fetch_arxiv_data():
             }
             all_papers.append(paper_data)
             count += 1
-            if count >= 10:
+            if count >= limit_per_year:
                 break
                 
     return all_papers
@@ -133,14 +143,14 @@ def generate_xml(papers):
     return ET.tostring(root, encoding="utf-8", method="xml")
 
 if st.button("Fetch & Curate arXiv Literature"):
-    with st.spinner("Fetching papers year-by-year (2026 down to 2023)..."):
-        papers = fetch_arxiv_data()
+    with st.spinner(f"Fetching up to {papers_per_year} papers per year (2026 down to 2023)..."):
+        papers = fetch_arxiv_data(papers_per_year)
         st.session_state['papers'] = papers
 
 if 'papers' in st.session_state and st.session_state['papers']:
     papers = st.session_state['papers']
     
-    st.subheader("Curated Publications")
+    st.subheader(f"Curated Publications ({len(papers)} Total Returned)")
     
     current_year = None
     for p in papers:
@@ -154,7 +164,7 @@ if 'papers' in st.session_state and st.session_state['papers']:
             st.markdown(f"**Abstract:** {p['summary']}")
             st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
 
-    st.sidebar.header("Download Curated List")
+    st.sidebar.header("Download Options")
     
     pdf_data = generate_pdf(papers)
     st.sidebar.download_button(
