@@ -239,37 +239,41 @@ if st.button(f"Fetch & Curate Literature from {data_source}"):
             
         st.session_state['papers'] = papers
 
-if 'papers' in st.session_state and st.session_state['papers']:
+# Updated logic to explicitly handle empty results
+if 'papers' in st.session_state:
     papers = st.session_state['papers']
     
-    st.subheader(f"Curated Publications ({len(papers)} Total Returned)")
-    
-    curr_yr = None
-    for p in papers:
-        if p['year'] != curr_yr:
-            curr_yr = p['year']
-            st.markdown(f"--- \n### 📅 Year: {curr_yr}")
-            
-        with st.expander(f"**{p['title']}** ({p['published_date']})"):
-            st.markdown(f"**Authors:** {', '.join(p['authors'])}")
-            st.markdown(f"**AI/ML Methods Used:** `{', '.join(p['keywords'])}`")
-            st.markdown(f"**Abstract:** {p['summary']}")
-            st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
+    if len(papers) == 0:
+        st.info("No publications utilizing AI/ML approaches were found for the selected parameters. Try adjusting the year range.")
+    else:
+        st.subheader(f"Curated Publications ({len(papers)} Total Returned)")
+        
+        curr_yr = None
+        for p in papers:
+            if p['year'] != curr_yr:
+                curr_yr = p['year']
+                st.markdown(f"--- \n### 📅 Year: {curr_yr}")
+                
+            with st.expander(f"**{p['title']}** ({p['published_date']})"):
+                st.markdown(f"**Authors:** {', '.join(p['authors'])}")
+                st.markdown(f"**AI/ML Methods Used:** `{', '.join(p['keywords'])}`")
+                st.markdown(f"**Abstract:** {p['summary']}")
+                st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
 
-    st.sidebar.header("Download Options")
-    
-    pdf_data = generate_pdf(papers)
-    st.sidebar.download_button(
-        label="📄 Download PDF",
-        data=pdf_data,
-        file_name="curated_literature.pdf",
-        mime="application/pdf"
-    )
-    
-    xml_data = generate_xml(papers)
-    st.sidebar.download_button(
-        label="🏷️ Download XML",
-        data=xml_data,
-        file_name="curated_literature.xml",
-        mime="application/xml"
-    )
+        st.sidebar.header("Download Options")
+        
+        pdf_data = generate_pdf(papers)
+        st.sidebar.download_button(
+            label="📄 Download PDF",
+            data=pdf_data,
+            file_name="curated_literature.pdf",
+            mime="application/pdf"
+        )
+        
+        xml_data = generate_xml(papers)
+        st.sidebar.download_button(
+            label="🏷️ Download XML",
+            data=xml_data,
+            file_name="curated_literature.xml",
+            mime="application/xml"
+        )
