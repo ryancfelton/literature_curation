@@ -75,14 +75,6 @@ def extract_keywords(abstract):
     # Return ONLY what was actually found (no forced fallbacks)
     return list(dict.fromkeys(found))
 
-# Inside fetch_arxiv_data and fetch_ads_data:
-# Only append the paper IF keywords were actually found
-keywords = extract_keywords(result.summary)
-if keywords:  # Discards papers with 0 AI/ML matches
-    paper_data["keywords"] = keywords
-    all_papers.append(paper_data)
-    count += 1
-
 def fetch_arxiv_data(years, limit_per_year):
     client = arxiv.Client()
     ai_terms = '(ti:"machine learning" OR ab:"machine learning" OR ti:"neural network" OR ab:"neural network" OR ti:"deep learning" OR ab:"deep learning" OR ti:"artificial intelligence" OR ab:"artificial intelligence")'
@@ -92,31 +84,37 @@ def fetch_arxiv_data(years, limit_per_year):
         date_query = f'submittedDate:[{year}01010000 TO {year}12312359]'
         query = f'cat:astro-ph.EP AND {date_query} AND {ai_terms}'
         
+        # We fetch extra results to account for papers that get filtered out locally
         search = arxiv.Search(
             query=query,
-            max_results=limit_per_year * 2,
+            max_results=limit_per_year * 5,
             sort_by=arxiv.SortCriterion.SubmittedDate
         )
         
         count = 0
         for result in client.results(search):
             keywords = extract_keywords(result.summary)
-            paper_data = {
-                "title": result.title.replace("\n", " "),
-                "authors": [a.name for a in result.authors],
-                "year": result.published.year,
-                "published_date": result.published.strftime("%B %d, %Y"),
-                "summary": result.summary.replace("\n", " "),
-                "arxiv_id": result.entry_id.split("/")[-1],
-                "pdf_url": result.pdf_url,
-                "doi": result.doi if result.doi else "N/A",
-                "journal_ref": result.journal_ref if result.journal_ref else "N/A",
-                "keywords": keywords
-            }
-            all_papers.append(paper_data)
-            count += 1
+            
+            # STRICT FILTER: Only include the paper if actual AI/ML keywords were found
+            if keywords:
+                paper_data = {
+                    "title": result.title.replace("\n", " "),
+                    "authors": [a.name for a in result.authors],
+                    "year": result.published.year,
+                    "published_date": result.published.strftime("%B %d, %Y"),
+                    "summary": result.summary.replace("\n", " "),
+                    "arxiv_id": result.entry_id.split("/")[-1],
+                    "pdf_url": result.pdf_url,
+                    "doi": result.doi if result.doi else "N/A",
+                    "journal_ref": result.journal_ref if result.journal_ref else "N/A",
+                    "keywords": keywords
+                }
+                all_papers.append(paper_data)
+                count += 1
+                
             if count >= limit_per_year:
                 break
+                
     return all_papers
 
 def fetch_ads_data(api_key, years, limit_per_year):
@@ -133,38 +131,52 @@ def fetch_ads_data(api_key, years, limit_per_year):
         params = {
             "q": query,
             "fl": "title,author,year,pubdate,abstract,identifier,doi,bibcode",
-            "rows": limit_per_year,
+            "rows": limit_per_year * 5, # Fetch extra to account for filtered false positives
             "sort": "date desc"
         }
         res = requests.get("https://api.adsabs.harvard.edu/v1/search/query", headers=headers, params=params)
+        
         if res.status_code == 200:
             docs = res.json().get("response", {}).get("docs", [])
+            count = 0
+            
             for doc in docs:
-                title = doc.get("title", ["N/A"])[0] if doc.get("title") else "N/A"
-                authors = doc.get("author", ["N/A"])
                 abstract = doc.get("abstract", "No abstract available.")
-                arxiv_id = "N/A"
-                for ident in doc.get("identifier", []):
-                    if "arXiv:" in ident or "arxiv:" in ident:
-                        arxiv_id = ident.replace("arXiv:", "").replace("arxiv:", "")
-                        break
-                doi = doc.get("doi", ["N/A"])[0] if doc.get("doi") else "N/A"
-                pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id != "N/A" else f"https://ui.adsabs.harvard.edu/abs/{doc.get('bibcode', '')}/abstract"
+                keywords = extract_keywords(abstract)
                 
-                all_papers.append({
-                    "title": title,
-                    "authors": authors,
-                    "year": int(doc.get("year", year)),
-                    "published_date": doc.get("pubdate", str(year)),
-                    "summary": abstract,
-                    "arxiv_id": arxiv_id,
-                    "pdf_url": pdf_url,
-                    "doi": doi,
-                    "journal_ref": doc.get("bibcode", "N/A"),
-                    "keywords": extract_keywords(abstract)
-                })
+                # STRICT FILTER: Only include if AI/ML methodology is present
+                if keywords:
+                    title = doc.get("title", ["N/A"])[0] if doc.get("title") else "N/A"
+                    authors = doc.get("author", ["N/A"])
+                    
+                    arxiv_id = "N/A"
+                    for ident in doc.get("identifier", []):
+                        if "arXiv:" in ident or "arxiv:" in ident:
+                            arxiv_id = ident.replace("arXiv:", "").replace("arxiv:", "")
+                            break
+                            
+                    doi = doc.get("doi", ["N/A"])[0] if doc.get("doi") else "N/A"
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id != "N/A" else f"https://ui.adsabs.harvard.edu/abs/{doc.get('bibcode', '')}/abstract"
+                    
+                    all_papers.append({
+                        "title": title,
+                        "authors": authors,
+                        "year": int(doc.get("year", year)),
+                        "published_date": doc.get("pubdate", str(year)),
+                        "summary": abstract,
+                        "arxiv_id": arxiv_id,
+                        "pdf_url": pdf_url,
+                        "doi": doi,
+                        "journal_ref": doc.get("bibcode", "N/A"),
+                        "keywords": keywords
+                    })
+                    count += 1
+                    
+                if count >= limit_per_year:
+                    break
         else:
             st.error(f"ADS API Error for year {year}: {res.status_code}")
+            
     return all_papers
 
 def generate_pdf(papers):
