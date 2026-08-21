@@ -59,7 +59,10 @@ def extract_keywords(abstract):
         "surrogate": "Surrogate Modeling",
         "physics-informed": "PINNs",
         "classification": "AI Classification",
-        "clustering": "Clustering"
+        "clustering": "Clustering",
+        "artificial intelligence": "AI",
+        "decision tree": "Decision Trees",
+        "xgboost": "XGBoost"
     }
     found = []
     text = abstract.lower() if abstract else ""
@@ -68,9 +71,17 @@ def extract_keywords(abstract):
             found.append(name)
         if len(found) >= 4:
             break
-    if len(found) < 2:
-        found.extend(["Machine Learning", "Data Science"])
-    return list(dict.fromkeys(found))[:4]
+            
+    # Return ONLY what was actually found (no forced fallbacks)
+    return list(dict.fromkeys(found))
+
+# Inside fetch_arxiv_data and fetch_ads_data:
+# Only append the paper IF keywords were actually found
+keywords = extract_keywords(result.summary)
+if keywords:  # Discards papers with 0 AI/ML matches
+    paper_data["keywords"] = keywords
+    all_papers.append(paper_data)
+    count += 1
 
 def fetch_arxiv_data(years, limit_per_year):
     client = arxiv.Client()
