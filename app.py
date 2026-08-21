@@ -239,41 +239,65 @@ if st.button(f"Fetch & Curate Literature from {data_source}"):
             
         st.session_state['papers'] = papers
 
-# Updated logic to explicitly handle empty results
+# Updated logic to handle search and empty results
 if 'papers' in st.session_state:
     papers = st.session_state['papers']
     
     if len(papers) == 0:
         st.info("No publications utilizing AI/ML approaches were found for the selected parameters. Try adjusting the year range.")
     else:
-        st.subheader(f"Curated Publications ({len(papers)} Total Returned)")
+        st.subheader(f"Curated Publications ({len(papers)} Total Fetched)")
         
-        curr_yr = None
-        for p in papers:
-            if p['year'] != curr_yr:
-                curr_yr = p['year']
-                st.markdown(f"--- \n### 📅 Year: {curr_yr}")
-                
-            with st.expander(f"**{p['title']}** ({p['published_date']})"):
-                st.markdown(f"**Authors:** {', '.join(p['authors'])}")
-                st.markdown(f"**AI/ML Methods Used:** `{', '.join(p['keywords'])}`")
-                st.markdown(f"**Abstract:** {p['summary']}")
-                st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
+        # In-result search functionality
+        search_query = st.text_input("🔍 Search within results (title, authors, keywords, abstract)...", "")
+        
+        # Filter papers based on search query
+        filtered_papers = []
+        if search_query:
+            query_lower = search_query.lower()
+            for p in papers:
+                if (query_lower in p['title'].lower() or 
+                    query_lower in p['summary'].lower() or 
+                    any(query_lower in author.lower() for author in p['authors']) or 
+                    any(query_lower in kw.lower() for kw in p['keywords'])):
+                    filtered_papers.append(p)
+        else:
+            filtered_papers = papers
 
-        st.sidebar.header("Download Options")
-        
-        pdf_data = generate_pdf(papers)
-        st.sidebar.download_button(
-            label="📄 Download PDF",
-            data=pdf_data,
-            file_name="curated_literature.pdf",
-            mime="application/pdf"
-        )
-        
-        xml_data = generate_xml(papers)
-        st.sidebar.download_button(
-            label="🏷️ Download XML",
-            data=xml_data,
-            file_name="curated_literature.xml",
-            mime="application/xml"
-        )
+        if len(filtered_papers) == 0:
+            st.warning("No fetched papers match your search query.")
+        else:
+            if search_query:
+                st.write(f"**Showing {len(filtered_papers)} results matching '{search_query}'**")
+                
+            curr_yr = None
+            for p in filtered_papers:
+                if p['year'] != curr_yr:
+                    curr_yr = p['year']
+                    st.markdown(f"--- \n### 📅 Year: {curr_yr}")
+                    
+                with st.expander(f"**{p['title']}** ({p['published_date']})"):
+                    st.markdown(f"**Authors:** {', '.join(p['authors'])}")
+                    st.markdown(f"**AI/ML Methods Used:** `{', '.join(p['keywords'])}`")
+                    st.markdown(f"**Abstract:** {p['summary']}")
+                    st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
+
+        # Download options update dynamically based on the filtered results
+        if len(filtered_papers) > 0:
+            st.sidebar.header("Download Options")
+            
+            pdf_data = generate_pdf(filtered_papers)
+            st.sidebar.download_button(
+                label="📄 Download PDF (Filtered)",
+                data=pdf_data,
+                file_name="curated_literature.pdf",
+                mime="application/pdf"
+            )
+            
+            xml_data = generate_xml(filtered_papers)
+            st.sidebar.download_button(
+                label="🏷️ Download XML (Filtered)",
+                data=xml_data,
+                file_name="curated_literature.xml",
+                mime="application/xml"
+            )
