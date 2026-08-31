@@ -22,7 +22,13 @@ data_source = st.sidebar.radio("Select Data Source", ["arXiv", "Harvard ADS"])
 
 ads_api_key = ""
 if data_source == "Harvard ADS":
-    ads_api_key = st.sidebar.text_input("Harvard ADS API Token", type="password", help="Get your free API key at ui.adsabs.harvard.edu")
+    # Check if the token is securely stored in Streamlit Cloud Secrets
+    if "ADS_API_KEY" in st.secrets:
+        ads_api_key = st.secrets["ADS_API_KEY"]
+        st.sidebar.success("ADS API Token securely loaded!")
+    else:
+        # Fallback for local testing or if secret isn't set
+        ads_api_key = st.sidebar.text_input("Harvard ADS API Token", type="password", help="Get your free API key at ui.adsabs.harvard.edu")
 
 # 2. Year Filter Slider
 current_year = 2026
