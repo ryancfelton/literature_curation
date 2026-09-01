@@ -244,7 +244,7 @@ def fetch_ntrs_data(years, limit_per_year):
     all_papers = []
     base_url = "https://ntrs.nasa.gov/api/citations/search"
     
-    # SMD Science Domain keywords to drop non-science/pure aeronautics reports
+    # Science Mission Directorate (SMD) broad domain terms
     smd_science_terms = [
         "planetary", "exoplanet", "astrobiology", "astrophysics", "earth",
         "heliophysics", "solar", "geoscience", "atmosphere", "geology", "orbit",
@@ -252,10 +252,17 @@ def fetch_ntrs_data(years, limit_per_year):
     ]
 
     for year in years:
-        query = '("machine learning" OR "deep learning" OR "neural network" OR "artificial intelligence") AND ("planetary" OR "astrophysics" OR "astrobiology" OR "earth science" OR "heliophysics")'
+        # NTRS native syntax uses `|` for OR instead of uppercase words
+        query = '"machine learning" | "deep learning" | "neural network" | "artificial intelligence"'
+        
+        params = {
+            "q": query,
+            "publicationDateFrom": f"{year}-01-01",
+            "publicationDateTo": f"{year}-12-31"
+        }
         
         try:
-            res = requests.get(base_url, params={"q": query, "page.size": limit_per_year * 5})
+            res = requests.get(base_url, params=params)
             if res.status_code == 200:
                 data = res.json()
                 docs = data.get("results", [])
@@ -267,12 +274,12 @@ def fetch_ntrs_data(years, limit_per_year):
                     clean_title = clean_text(doc.get("title", "N/A"))
                     
                     pub_date = doc.get("publicationDate") or doc.get("issued") or doc.get("created") or str(year)
-                    doc_year = int(pub_date[:4]) if (pub_date and pub_date[:4].isdigit()) else year
+                    doc_year_str = str(pub_date)[:4]
+                    doc_year = int(doc_year_str) if doc_year_str.isdigit() else year
                     
                     if doc_year != year:
                         continue
                     
-                    # Ensure science context across title and abstract
                     combined_text = (clean_title + " " + clean_abstract).lower()
                     is_science = any(s_kw in combined_text for s_kw in smd_science_terms)
                     keywords = extract_keywords(clean_abstract)
@@ -287,8 +294,12 @@ def fetch_ntrs_data(years, limit_per_year):
                                     name = author_obj.get("name") or auth_item.get("name")
                                     if name:
                                         authors.append(name)
-                        if not authors and "authors" in doc:
-                            authors = [a.get("name", "N/A") if isinstance(a, dict) else str(a) for a in doc["authors"]]
+                        if not authors and "authors" in doc and isinstance(doc["authors"], list):
+                            for a in doc["authors"]:
+                                if isinstance(a, dict) and "name" in a:
+                                    authors.append(a["name"])
+                                elif isinstance(a, str):
+                                    authors.append(a)
                         if not authors:
                             authors = ["NASA Contributor"]
                             
