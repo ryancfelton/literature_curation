@@ -12,7 +12,7 @@ from xml.etree import ElementTree as ET
 
 st.set_page_config(page_title="Literature Curation Tool", layout="wide")
 
-st.title("🌌 Earth & Planetary Astrophysics AI/ML Literature Curation")
+st.title("🌌 Planetary Sciences and Astrobiology AI/ML Literature Curation")
 st.markdown("Curate publications in planetary sciences and astrobiology that utilize AI/ML approaches.")
 
 # Sidebar Configuration
