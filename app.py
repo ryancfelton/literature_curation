@@ -337,7 +337,7 @@ if 'papers' in st.session_state:
             for p in filtered_papers:
                 if p['year'] != curr_yr:
                     curr_yr = p['year']
-                    st.markdown(f"--- \n### 📅 Year: {curr_yr}")
+                    st.markdown(f"--- \n### Year: {curr_yr}")
                     
                 with st.expander(f"**{p['title']}** ({p['published_date']})"):
                     st.markdown(f"**Authors:** {', '.join(p['authors'])}")
