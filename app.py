@@ -12,8 +12,8 @@ from xml.etree import ElementTree as ET
 
 st.set_page_config(page_title="Literature Curation Tool", layout="wide")
 
-st.title("🌌 Planetary Sciences and Astrobiology AI/ML Literature Curation")
-st.markdown("Curate publications in planetary sciences and astrobiology that utilize AI/ML approaches.")
+st.title("🌌 Planetary & Space Science AI/ML Literature Curation")
+st.markdown("Curate publications in planetary science, astrophysics, and astrobiology that utilize AI/ML approaches.")
 
 # Sidebar Configuration
 st.sidebar.header("Search & Source Settings")
@@ -21,7 +21,12 @@ st.sidebar.header("Search & Source Settings")
 # 1. Source Toggle
 data_source = st.sidebar.radio(
     "Select Data Source", 
-    ["arXiv (astro-ph.EP)", "Harvard ADS (astro-ph.EP)", "Astrobiology (Journal Only)"]
+    [
+        "arXiv (astro-ph.EP)", 
+        "Harvard ADS (astro-ph.EP)", 
+        "Astrobiology (Journal Only)",
+        "NASA Technical Reports (NTRS)"
+    ]
 )
 
 ads_api_key = ""
@@ -172,7 +177,6 @@ def fetch_ads_data(api_key, years, limit_per_year, source_type):
         if source_type == "Harvard ADS (astro-ph.EP)":
             cat_terms = '(arxiv_class:"astro-ph.EP" OR keyword:"astro-ph.EP" OR abs:"astro-ph.EP")'
         else:
-            # Strictly the Mary Ann Liebert Astrobiology journal (Bibstem: AsBio)
             cat_terms = 'bibstem:"AsBio"'
             
         query = f'{ai_terms} AND {cat_terms} AND year:{year}'
@@ -236,6 +240,86 @@ def fetch_ads_data(api_key, years, limit_per_year, source_type):
             
     return all_papers
 
+def fetch_ntrs_data(years, limit_per_year):
+    all_papers = []
+    base_url = "https://ntrs.nasa.gov/api/citations/search"
+    
+    # SMD Science Domain keywords to drop non-science/pure aeronautics reports
+    smd_science_terms = [
+        "planetary", "exoplanet", "astrobiology", "astrophysics", "earth",
+        "heliophysics", "solar", "geoscience", "atmosphere", "geology", "orbit",
+        "spectroscopy", "biosignature", "galaxy", "stellar", "space science", "climate"
+    ]
+
+    for year in years:
+        query = '("machine learning" OR "deep learning" OR "neural network" OR "artificial intelligence") AND ("planetary" OR "astrophysics" OR "astrobiology" OR "earth science" OR "heliophysics")'
+        
+        try:
+            res = requests.get(base_url, params={"q": query, "page.size": limit_per_year * 5})
+            if res.status_code == 200:
+                data = res.json()
+                docs = data.get("results", [])
+                count = 0
+                
+                for doc in docs:
+                    raw_abstract = doc.get("abstract", "No abstract available.")
+                    clean_abstract = clean_text(raw_abstract)
+                    clean_title = clean_text(doc.get("title", "N/A"))
+                    
+                    pub_date = doc.get("publicationDate") or doc.get("issued") or doc.get("created") or str(year)
+                    doc_year = int(pub_date[:4]) if (pub_date and pub_date[:4].isdigit()) else year
+                    
+                    if doc_year != year:
+                        continue
+                    
+                    # Ensure science context across title and abstract
+                    combined_text = (clean_title + " " + clean_abstract).lower()
+                    is_science = any(s_kw in combined_text for s_kw in smd_science_terms)
+                    keywords = extract_keywords(clean_abstract)
+                    
+                    if keywords and is_science:
+                        authors = []
+                        if "authorAffiliations" in doc and isinstance(doc["authorAffiliations"], list):
+                            for auth_item in doc["authorAffiliations"]:
+                                if isinstance(auth_item, dict):
+                                    meta = auth_item.get("meta", {})
+                                    author_obj = meta.get("author", {})
+                                    name = author_obj.get("name") or auth_item.get("name")
+                                    if name:
+                                        authors.append(name)
+                        if not authors and "authors" in doc:
+                            authors = [a.get("name", "N/A") if isinstance(a, dict) else str(a) for a in doc["authors"]]
+                        if not authors:
+                            authors = ["NASA Contributor"]
+                            
+                        ntrs_id = doc.get("id", "N/A")
+                        ads_url = f"https://ntrs.nasa.gov/citations/{ntrs_id}" if ntrs_id != "N/A" else "N/A"
+                        pdf_url = f"https://ntrs.nasa.gov/api/citations/{ntrs_id}/downloads/{ntrs_id}.pdf" if ntrs_id != "N/A" else ads_url
+                        doi = doc.get("doi", "N/A")
+                        
+                        all_papers.append({
+                            "title": clean_title,
+                            "authors": authors,
+                            "year": doc_year,
+                            "published_date": str(pub_date[:10]),
+                            "summary": clean_abstract,
+                            "arxiv_id": "N/A",
+                            "bibcode": str(ntrs_id),
+                            "ads_url": ads_url,
+                            "pdf_url": pdf_url,
+                            "doi": doi,
+                            "keywords": keywords,
+                            "source": "NASA Technical Reports (NTRS)"
+                        })
+                        count += 1
+                        
+                    if count >= limit_per_year:
+                        break
+        except Exception as e:
+            st.error(f"NTRS API Error for year {year}: {e}")
+            
+    return all_papers
+
 def generate_pdf(papers, source_name):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
@@ -261,6 +345,8 @@ def generate_pdf(papers, source_name):
         
         if "arXiv" in paper['source']:
             ref_line = f"arXiv:{paper['arxiv_id']} | Link: {paper['pdf_url']}"
+        elif "NTRS" in paper['source']:
+            ref_line = f"NTRS ID: {paper['bibcode']} | Link: {paper['ads_url']}"
         else:
             ref_line = f"Bibcode: {paper['bibcode']} | Link: {paper['ads_url']}"
             
@@ -298,6 +384,8 @@ if st.button(f"Fetch & Curate Literature from {data_source.split(' ')[0]}"):
     with st.spinner(f"Querying {data_source} for up to {papers_per_year} papers/year..."):
         if data_source == "arXiv (astro-ph.EP)":
             papers = fetch_arxiv_data(selected_years, papers_per_year)
+        elif data_source == "NASA Technical Reports (NTRS)":
+            papers = fetch_ntrs_data(selected_years, papers_per_year)
         else:
             papers = fetch_ads_data(ads_api_key, selected_years, papers_per_year, data_source)
             
@@ -346,6 +434,8 @@ if 'papers' in st.session_state:
                     
                     if "arXiv" in p['source']:
                         st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
+                    elif "NTRS" in p['source']:
+                        st.markdown(f"**Reference Info:** NTRS ID: [`{p['bibcode']}`]({p['ads_url']}) | DOI: {p['doi']} | [NTRS Document]({p['pdf_url']})")
                     else:
                         st.markdown(f"**Reference Info:** Bibcode: [`{p['bibcode']}`]({p['ads_url']}) | DOI: {p['doi']} | arXiv:{p['arxiv_id']}")
 
