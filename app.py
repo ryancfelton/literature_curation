@@ -13,18 +13,22 @@ from xml.etree import ElementTree as ET
 st.set_page_config(page_title="Literature Curation Tool", layout="wide")
 
 st.title("🌌 Earth & Planetary Astrophysics AI/ML Literature Curation")
-st.markdown("Curate publications in `astro-ph.EP` that utilize AI/ML approaches.")
+st.markdown("Curate publications in planetary sciences and astrobiology that utilize AI/ML approaches.")
 
 # Sidebar Configuration
 st.sidebar.header("Search & Source Settings")
 
 # 1. Source Toggle
-data_source = st.sidebar.radio("Select Data Source", ["arXiv", "Harvard ADS"])
+data_source = st.sidebar.radio(
+    "Select Data Source", 
+    ["arXiv (astro-ph.EP)", "Harvard ADS (astro-ph.EP)", "Astrobiology (Journal Only)"]
+)
 
 ads_api_key = ""
-if data_source == "Harvard ADS":
+if data_source in ["Harvard ADS (astro-ph.EP)", "Astrobiology (Journal Only)"]:
     if "ADS_API_KEY" in st.secrets and st.secrets["ADS_API_KEY"]:
         ads_api_key = st.secrets["ADS_API_KEY"]
+        st.sidebar.success("🔒 ADS API Token loaded from Secrets")
     else:
         ads_api_key = st.sidebar.text_input("Harvard ADS API Token", type="password", help="Get your free API key at ui.adsabs.harvard.edu")
 
@@ -155,7 +159,7 @@ def fetch_arxiv_data(years, limit_per_year):
                 
     return all_papers
 
-def fetch_ads_data(api_key, years, limit_per_year):
+def fetch_ads_data(api_key, years, limit_per_year, source_type):
     if not api_key:
         st.error("Please enter a valid Harvard ADS API Token or set ADS_API_KEY in Streamlit Secrets.")
         return []
@@ -165,7 +169,13 @@ def fetch_ads_data(api_key, years, limit_per_year):
     
     for year in years:
         ai_terms = 'abs:("machine learning" OR "deep learning" OR "neural network" OR "artificial intelligence")'
-        cat_terms = '(arxiv_class:"astro-ph.EP" OR keyword:"astro-ph.EP" OR abs:"astro-ph.EP")'
+        
+        if source_type == "Harvard ADS (astro-ph.EP)":
+            cat_terms = '(arxiv_class:"astro-ph.EP" OR keyword:"astro-ph.EP" OR abs:"astro-ph.EP")'
+        else:
+            # Strictly the Mary Ann Liebert Astrobiology journal (Bibstem: AsBio)
+            cat_terms = 'bibstem:"AsBio"'
+            
         query = f'{ai_terms} AND {cat_terms} AND year:{year}'
         
         params = {
@@ -191,7 +201,6 @@ def fetch_ads_data(api_key, years, limit_per_year):
                     authors = doc.get("author", ["N/A"])
                     bibcode = doc.get("bibcode", "N/A")
                     
-                    # Resolve ADS pubdate into clean string format
                     raw_pubdate = doc.get("pubdate", str(year))
                     formatted_date = format_ads_date(raw_pubdate, year)
                     
@@ -217,7 +226,7 @@ def fetch_ads_data(api_key, years, limit_per_year):
                         "pdf_url": pdf_url,
                         "doi": doi,
                         "keywords": keywords,
-                        "source": "Harvard ADS"
+                        "source": source_type
                     })
                     count += 1
                     
@@ -228,7 +237,7 @@ def fetch_ads_data(api_key, years, limit_per_year):
             
     return all_papers
 
-def generate_pdf(papers):
+def generate_pdf(papers, source_name):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
@@ -237,7 +246,7 @@ def generate_pdf(papers):
     title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=16, leading=20)
     normal_style = styles['Normal']
     
-    story.append(Paragraph(f"Curated {data_source} AI/ML Literature (astro-ph.EP)", title_style))
+    story.append(Paragraph(f"Curated {source_name} AI/ML Literature", title_style))
     story.append(Spacer(1, 12))
     
     curr_yr = None
@@ -251,8 +260,11 @@ def generate_pdf(papers):
         authors = ", ".join(paper['authors'][:3]) + (" et al." if len(paper['authors']) > 3 else "")
         kw_str = ", ".join(paper['keywords'])
         
-        ref_line = f"Bibcode: {paper['bibcode']} | Link: {paper['ads_url']}" if paper['source'] == "Harvard ADS" else f"arXiv:{paper['arxiv_id']} | Link: {paper['pdf_url']}"
-        
+        if "arXiv" in paper['source']:
+            ref_line = f"arXiv:{paper['arxiv_id']} | Link: {paper['pdf_url']}"
+        else:
+            ref_line = f"Bibcode: {paper['bibcode']} | Link: {paper['ads_url']}"
+            
         text = f"<b>Title:</b> {paper['title']}<br/>" \
                f"<b>Authors:</b> {authors}<br/>" \
                f"<b>AI/ML Keywords:</b> {kw_str}<br/>" \
@@ -283,22 +295,24 @@ def generate_xml(papers):
         
     return ET.tostring(root, encoding="utf-8", method="xml")
 
-if st.button(f"Fetch & Curate Literature from {data_source}"):
+if st.button(f"Fetch & Curate Literature from {data_source.split(' ')[0]}"):
     with st.spinner(f"Querying {data_source} for up to {papers_per_year} papers/year..."):
-        if data_source == "arXiv":
+        if data_source == "arXiv (astro-ph.EP)":
             papers = fetch_arxiv_data(selected_years, papers_per_year)
         else:
-            papers = fetch_ads_data(ads_api_key, selected_years, papers_per_year)
+            papers = fetch_ads_data(ads_api_key, selected_years, papers_per_year, data_source)
             
         st.session_state['papers'] = papers
+        st.session_state['current_source'] = data_source
 
 if 'papers' in st.session_state:
     papers = st.session_state['papers']
+    current_source = st.session_state.get('current_source', data_source)
     
     if len(papers) == 0:
-        st.info(f"No publications utilizing AI/ML approaches were found in {data_source} for the selected parameters.")
+        st.info(f"No publications utilizing AI/ML approaches were found in {current_source} for the selected parameters.")
     else:
-        st.subheader(f"Curated Publications ({len(papers)} Total Fetched from {data_source})")
+        st.subheader(f"Curated Publications ({len(papers)} Total Fetched from {current_source})")
         
         search_query = st.text_input("🔍 Search within fetched results...", "")
         
@@ -324,26 +338,26 @@ if 'papers' in st.session_state:
             for p in filtered_papers:
                 if p['year'] != curr_yr:
                     curr_yr = p['year']
-                    st.markdown(f"--- \n### Year: {curr_yr}")
+                    st.markdown(f"--- \n### 📅 Year: {curr_yr}")
                     
                 with st.expander(f"**{p['title']}** ({p['published_date']})"):
                     st.markdown(f"**Authors:** {', '.join(p['authors'])}")
                     st.markdown(f"**AI/ML Methods Used:** `{', '.join(p['keywords'])}`")
                     st.markdown(f"**Abstract:** {p['summary']}")
                     
-                    if p['source'] == "Harvard ADS":
-                        st.markdown(f"**Reference Info:** Bibcode: [`{p['bibcode']}`]({p['ads_url']}) | DOI: {p['doi']} | arXiv:{p['arxiv_id']}")
-                    else:
+                    if "arXiv" in p['source']:
                         st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
+                    else:
+                        st.markdown(f"**Reference Info:** Bibcode: [`{p['bibcode']}`]({p['ads_url']}) | DOI: {p['doi']} | arXiv:{p['arxiv_id']}")
 
         if len(filtered_papers) > 0:
             st.sidebar.header("Download Options")
             
-            pdf_data = generate_pdf(filtered_papers)
+            pdf_data = generate_pdf(filtered_papers, current_source)
             st.sidebar.download_button(
                 label="📄 Download PDF",
                 data=pdf_data,
-                file_name=f"{data_source.lower()}_curated_literature.pdf",
+                file_name=f"{current_source.split(' ')[0].lower()}_curated_literature.pdf",
                 mime="application/pdf"
             )
             
@@ -351,6 +365,6 @@ if 'papers' in st.session_state:
             st.sidebar.download_button(
                 label="🏷️ Download XML",
                 data=xml_data,
-                file_name=f"{data_source.lower()}_curated_literature.xml",
+                file_name=f"{current_source.split(' ')[0].lower()}_curated_literature.xml",
                 mime="application/xml"
             )
