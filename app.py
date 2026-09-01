@@ -28,7 +28,6 @@ ads_api_key = ""
 if data_source in ["Harvard ADS (astro-ph.EP)", "Astrobiology (Journal Only)"]:
     if "ADS_API_KEY" in st.secrets and st.secrets["ADS_API_KEY"]:
         ads_api_key = st.secrets["ADS_API_KEY"]
-        st.sidebar.success("🔒 ADS API Token loaded from Secrets")
     else:
         ads_api_key = st.sidebar.text_input("Harvard ADS API Token", type="password", help="Get your free API key at ui.adsabs.harvard.edu")
 
