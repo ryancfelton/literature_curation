@@ -12,8 +12,8 @@ from xml.etree import ElementTree as ET
 
 st.set_page_config(page_title="Literature Curation Tool", layout="wide")
 
-st.title("🌌 AI/ML Literature Curation")
-st.markdown("Curate publications that utilize AI/ML approaches.")
+st.title("🌌 Earth & Planetary Astrophysics AI/ML Literature Curation")
+st.markdown("Curate publications in `astro-ph.EP` that utilize AI/ML approaches.")
 
 # Sidebar Configuration
 st.sidebar.header("Search & Source Settings")
@@ -23,7 +23,6 @@ data_source = st.sidebar.radio("Select Data Source", ["arXiv", "Harvard ADS"])
 
 ads_api_key = ""
 if data_source == "Harvard ADS":
-    # Check Streamlit Secrets first
     if "ADS_API_KEY" in st.secrets and st.secrets["ADS_API_KEY"]:
         ads_api_key = st.secrets["ADS_API_KEY"]
     else:
@@ -53,14 +52,34 @@ def clean_text(text):
     """Removes raw XML/MathML tags (common in ADS) and unescapes HTML entities."""
     if not isinstance(text, str):
         return "N/A"
-    # Unescape HTML entities (e.g., &amp; -> &)
     text = html.unescape(text)
-    # Remove XML/HTML tags (like <mml:math>, <jats:inline-formula>)
-    # Uses a pattern that safely ignores standalone < or > used in math equations
     text = re.sub(r'<[a-zA-Z\/][^>]*>', '', text)
-    # Clean up extra whitespace and newlines
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
+
+def format_ads_date(pubdate_str, year):
+    """Formats ADS YYYY-MM-DD dates, cleanly resolving '00' placeholders for missing days/months."""
+    if not pubdate_str or pubdate_str == "N/A":
+        return str(year)
+    
+    parts = pubdate_str.split('-')
+    if len(parts) == 3:
+        y, m, d = parts
+        months = ["", "January", "February", "March", "April", "May", "June", 
+                  "July", "August", "September", "October", "November", "December"]
+        try:
+            m_int = int(m)
+            d_int = int(d)
+            if m_int > 0 and d_int > 0:
+                dt = datetime(int(y), m_int, d_int)
+                return dt.strftime("%B %d, %Y")
+            elif m_int > 0:
+                return f"{months[m_int]} {y}"
+            else:
+                return str(y)
+        except ValueError:
+            return pubdate_str
+    return pubdate_str
 
 def extract_keywords(abstract):
     ai_keywords = {
@@ -172,6 +191,10 @@ def fetch_ads_data(api_key, years, limit_per_year):
                     authors = doc.get("author", ["N/A"])
                     bibcode = doc.get("bibcode", "N/A")
                     
+                    # Resolve ADS pubdate into clean string format
+                    raw_pubdate = doc.get("pubdate", str(year))
+                    formatted_date = format_ads_date(raw_pubdate, year)
+                    
                     arxiv_id = "N/A"
                     for ident in doc.get("identifier", []):
                         if "arXiv:" in ident or "arxiv:" in ident:
@@ -186,7 +209,7 @@ def fetch_ads_data(api_key, years, limit_per_year):
                         "title": clean_title,
                         "authors": authors,
                         "year": int(doc.get("year", year)),
-                        "published_date": doc.get("pubdate", str(year)),
+                        "published_date": formatted_date,
                         "summary": clean_abstract,
                         "arxiv_id": arxiv_id,
                         "bibcode": bibcode,
@@ -301,7 +324,7 @@ if 'papers' in st.session_state:
             for p in filtered_papers:
                 if p['year'] != curr_yr:
                     curr_yr = p['year']
-                    st.markdown(f"--- \n### 📅 Year: {curr_yr}")
+                    st.markdown(f"--- \n### Year: {curr_yr}")
                     
                 with st.expander(f"**{p['title']}** ({p['published_date']})"):
                     st.markdown(f"**Authors:** {', '.join(p['authors'])}")
