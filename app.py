@@ -2,6 +2,7 @@ import streamlit as st
 import arxiv
 import requests
 import re
+import html
 from datetime import datetime
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
@@ -47,6 +48,19 @@ papers_per_year = st.sidebar.slider(
     value=10,
     step=1
 )
+
+def clean_text(text):
+    """Removes raw XML/MathML tags (common in ADS) and unescapes HTML entities."""
+    if not isinstance(text, str):
+        return "N/A"
+    # Unescape HTML entities (e.g., &amp; -> &)
+    text = html.unescape(text)
+    # Remove XML/HTML tags (like <mml:math>, <jats:inline-formula>)
+    # Uses a pattern that safely ignores standalone < or > used in math equations
+    text = re.sub(r'<[a-zA-Z\/][^>]*>', '', text)
+    # Clean up extra whitespace and newlines
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 def extract_keywords(abstract):
     ai_keywords = {
@@ -95,14 +109,17 @@ def fetch_arxiv_data(years, limit_per_year):
         
         count = 0
         for result in client.results(search):
-            keywords = extract_keywords(result.summary)
+            clean_summary = clean_text(result.summary)
+            clean_title = clean_text(result.title)
+            keywords = extract_keywords(clean_summary)
+            
             if keywords:
                 paper_data = {
-                    "title": result.title.replace("\n", " "),
+                    "title": clean_title,
                     "authors": [a.name for a in result.authors],
                     "year": result.published.year,
                     "published_date": result.published.strftime("%B %d, %Y"),
-                    "summary": result.summary.replace("\n", " "),
+                    "summary": clean_summary,
                     "arxiv_id": result.entry_id.split("/")[-1],
                     "bibcode": "N/A",
                     "ads_url": "N/A",
@@ -145,11 +162,13 @@ def fetch_ads_data(api_key, years, limit_per_year):
             count = 0
             
             for doc in docs:
-                abstract = doc.get("abstract", "No abstract available.")
-                keywords = extract_keywords(abstract)
+                raw_abstract = doc.get("abstract", "No abstract available.")
+                clean_abstract = clean_text(raw_abstract)
+                keywords = extract_keywords(clean_abstract)
                 
                 if keywords:
-                    title = doc.get("title", ["N/A"])[0] if doc.get("title") else "N/A"
+                    raw_title = doc.get("title", ["N/A"])[0] if doc.get("title") else "N/A"
+                    clean_title = clean_text(raw_title)
                     authors = doc.get("author", ["N/A"])
                     bibcode = doc.get("bibcode", "N/A")
                     
@@ -164,11 +183,11 @@ def fetch_ads_data(api_key, years, limit_per_year):
                     pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id != "N/A" else ads_url
                     
                     all_papers.append({
-                        "title": title,
+                        "title": clean_title,
                         "authors": authors,
                         "year": int(doc.get("year", year)),
                         "published_date": doc.get("pubdate", str(year)),
-                        "summary": abstract,
+                        "summary": clean_abstract,
                         "arxiv_id": arxiv_id,
                         "bibcode": bibcode,
                         "ads_url": ads_url,
