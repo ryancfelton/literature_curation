@@ -22,12 +22,10 @@ data_source = st.sidebar.radio("Select Data Source", ["arXiv", "Harvard ADS"])
 
 ads_api_key = ""
 if data_source == "Harvard ADS":
-    # Check if the token is securely stored in Streamlit Cloud Secrets
-    if "ADS_API_KEY" in st.secrets:
+    # Check Streamlit Secrets first
+    if "ADS_API_KEY" in st.secrets and st.secrets["ADS_API_KEY"]:
         ads_api_key = st.secrets["ADS_API_KEY"]
-        st.sidebar.success("ADS API Token securely loaded!")
     else:
-        # Fallback for local testing or if secret isn't set
         ads_api_key = st.sidebar.text_input("Harvard ADS API Token", type="password", help="Get your free API key at ui.adsabs.harvard.edu")
 
 # 2. Year Filter Slider
@@ -78,7 +76,6 @@ def extract_keywords(abstract):
         if len(found) >= 4:
             break
             
-    # Return ONLY what was actually found (no forced fallbacks)
     return list(dict.fromkeys(found))
 
 def fetch_arxiv_data(years, limit_per_year):
@@ -90,7 +87,6 @@ def fetch_arxiv_data(years, limit_per_year):
         date_query = f'submittedDate:[{year}01010000 TO {year}12312359]'
         query = f'cat:astro-ph.EP AND {date_query} AND {ai_terms}'
         
-        # We fetch extra results to account for papers that get filtered out locally
         search = arxiv.Search(
             query=query,
             max_results=limit_per_year * 5,
@@ -100,8 +96,6 @@ def fetch_arxiv_data(years, limit_per_year):
         count = 0
         for result in client.results(search):
             keywords = extract_keywords(result.summary)
-            
-            # STRICT FILTER: Only include the paper if actual AI/ML keywords were found
             if keywords:
                 paper_data = {
                     "title": result.title.replace("\n", " "),
@@ -110,10 +104,12 @@ def fetch_arxiv_data(years, limit_per_year):
                     "published_date": result.published.strftime("%B %d, %Y"),
                     "summary": result.summary.replace("\n", " "),
                     "arxiv_id": result.entry_id.split("/")[-1],
+                    "bibcode": "N/A",
+                    "ads_url": "N/A",
                     "pdf_url": result.pdf_url,
                     "doi": result.doi if result.doi else "N/A",
-                    "journal_ref": result.journal_ref if result.journal_ref else "N/A",
-                    "keywords": keywords
+                    "keywords": keywords,
+                    "source": "arXiv"
                 }
                 all_papers.append(paper_data)
                 count += 1
@@ -125,19 +121,21 @@ def fetch_arxiv_data(years, limit_per_year):
 
 def fetch_ads_data(api_key, years, limit_per_year):
     if not api_key:
-        st.error("Please enter a valid Harvard ADS API Token in the sidebar.")
+        st.error("Please enter a valid Harvard ADS API Token or set ADS_API_KEY in Streamlit Secrets.")
         return []
     
     all_papers = []
     headers = {"Authorization": f"Bearer {api_key}"}
-    ai_terms = 'abs:("machine learning" OR "deep learning" OR "neural network" OR "artificial intelligence")'
     
     for year in years:
-        query = f'{ai_terms} AND year:{year} AND (keyword:"astro-ph.EP" OR abs:"astro-ph.EP" OR doctype:"eprint")'
+        ai_terms = 'abs:("machine learning" OR "deep learning" OR "neural network" OR "artificial intelligence")'
+        cat_terms = '(arxiv_class:"astro-ph.EP" OR keyword:"astro-ph.EP" OR abs:"astro-ph.EP")'
+        query = f'{ai_terms} AND {cat_terms} AND year:{year}'
+        
         params = {
             "q": query,
             "fl": "title,author,year,pubdate,abstract,identifier,doi,bibcode",
-            "rows": limit_per_year * 5, # Fetch extra to account for filtered false positives
+            "rows": limit_per_year * 5,
             "sort": "date desc"
         }
         res = requests.get("https://api.adsabs.harvard.edu/v1/search/query", headers=headers, params=params)
@@ -150,10 +148,10 @@ def fetch_ads_data(api_key, years, limit_per_year):
                 abstract = doc.get("abstract", "No abstract available.")
                 keywords = extract_keywords(abstract)
                 
-                # STRICT FILTER: Only include if AI/ML methodology is present
                 if keywords:
                     title = doc.get("title", ["N/A"])[0] if doc.get("title") else "N/A"
                     authors = doc.get("author", ["N/A"])
+                    bibcode = doc.get("bibcode", "N/A")
                     
                     arxiv_id = "N/A"
                     for ident in doc.get("identifier", []):
@@ -162,7 +160,8 @@ def fetch_ads_data(api_key, years, limit_per_year):
                             break
                             
                     doi = doc.get("doi", ["N/A"])[0] if doc.get("doi") else "N/A"
-                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id != "N/A" else f"https://ui.adsabs.harvard.edu/abs/{doc.get('bibcode', '')}/abstract"
+                    ads_url = f"https://ui.adsabs.harvard.edu/abs/{bibcode}/abstract" if bibcode != "N/A" else "N/A"
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id != "N/A" else ads_url
                     
                     all_papers.append({
                         "title": title,
@@ -171,10 +170,12 @@ def fetch_ads_data(api_key, years, limit_per_year):
                         "published_date": doc.get("pubdate", str(year)),
                         "summary": abstract,
                         "arxiv_id": arxiv_id,
+                        "bibcode": bibcode,
+                        "ads_url": ads_url,
                         "pdf_url": pdf_url,
                         "doi": doi,
-                        "journal_ref": doc.get("bibcode", "N/A"),
-                        "keywords": keywords
+                        "keywords": keywords,
+                        "source": "Harvard ADS"
                     })
                     count += 1
                     
@@ -208,10 +209,12 @@ def generate_pdf(papers):
         authors = ", ".join(paper['authors'][:3]) + (" et al." if len(paper['authors']) > 3 else "")
         kw_str = ", ".join(paper['keywords'])
         
+        ref_line = f"Bibcode: {paper['bibcode']} | Link: {paper['ads_url']}" if paper['source'] == "Harvard ADS" else f"arXiv:{paper['arxiv_id']} | Link: {paper['pdf_url']}"
+        
         text = f"<b>Title:</b> {paper['title']}<br/>" \
                f"<b>Authors:</b> {authors}<br/>" \
                f"<b>AI/ML Keywords:</b> {kw_str}<br/>" \
-               f"<b>Reference:</b> arXiv:{paper['arxiv_id']} | DOI: {paper['doi']} | Link: {paper['pdf_url']}<br/>"
+               f"<b>Reference:</b> {ref_line} | DOI: {paper['doi']}<br/>"
         story.append(Paragraph(text, normal_style))
         story.append(Spacer(1, 10))
         
@@ -227,17 +230,19 @@ def generate_xml(papers):
         ET.SubElement(pub, "year").text = str(p["year"])
         ET.SubElement(pub, "authors").text = ", ".join(p["authors"])
         ET.SubElement(pub, "keywords").text = ", ".join(p["keywords"])
+        ET.SubElement(pub, "source").text = p["source"]
         
         ref = ET.SubElement(pub, "reference")
+        ET.SubElement(ref, "bibcode").text = p["bibcode"]
+        ET.SubElement(ref, "ads_url").text = p["ads_url"]
         ET.SubElement(ref, "arxiv_id").text = p["arxiv_id"]
         ET.SubElement(ref, "pdf_url").text = p["pdf_url"]
         ET.SubElement(ref, "doi").text = p["doi"]
-        ET.SubElement(ref, "journal_ref").text = p["journal_ref"]
         
     return ET.tostring(root, encoding="utf-8", method="xml")
 
 if st.button(f"Fetch & Curate Literature from {data_source}"):
-    with st.spinner(f"Fetching up to {papers_per_year} papers/year across {len(selected_years)} years..."):
+    with st.spinner(f"Querying {data_source} for up to {papers_per_year} papers/year..."):
         if data_source == "arXiv":
             papers = fetch_arxiv_data(selected_years, papers_per_year)
         else:
@@ -245,19 +250,16 @@ if st.button(f"Fetch & Curate Literature from {data_source}"):
             
         st.session_state['papers'] = papers
 
-# Updated logic to handle search and empty results
 if 'papers' in st.session_state:
     papers = st.session_state['papers']
     
     if len(papers) == 0:
-        st.info("No publications utilizing AI/ML approaches were found for the selected parameters. Try adjusting the year range.")
+        st.info(f"No publications utilizing AI/ML approaches were found in {data_source} for the selected parameters.")
     else:
-        st.subheader(f"Curated Publications ({len(papers)} Total Fetched)")
+        st.subheader(f"Curated Publications ({len(papers)} Total Fetched from {data_source})")
         
-        # In-result search functionality
-        search_query = st.text_input("🔍 Search within results (title, authors, keywords, abstract)...", "")
+        search_query = st.text_input("🔍 Search within fetched results...", "")
         
-        # Filter papers based on search query
         filtered_papers = []
         if search_query:
             query_lower = search_query.lower()
@@ -286,24 +288,27 @@ if 'papers' in st.session_state:
                     st.markdown(f"**Authors:** {', '.join(p['authors'])}")
                     st.markdown(f"**AI/ML Methods Used:** `{', '.join(p['keywords'])}`")
                     st.markdown(f"**Abstract:** {p['summary']}")
-                    st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
+                    
+                    if p['source'] == "Harvard ADS":
+                        st.markdown(f"**Reference Info:** Bibcode: [`{p['bibcode']}`]({p['ads_url']}) | DOI: {p['doi']} | arXiv:{p['arxiv_id']}")
+                    else:
+                        st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
 
-        # Download options update dynamically based on the filtered results
         if len(filtered_papers) > 0:
             st.sidebar.header("Download Options")
             
             pdf_data = generate_pdf(filtered_papers)
             st.sidebar.download_button(
-                label="📄 Download PDF (Filtered)",
+                label="📄 Download PDF",
                 data=pdf_data,
-                file_name="curated_literature.pdf",
+                file_name=f"{data_source.lower()}_curated_literature.pdf",
                 mime="application/pdf"
             )
             
             xml_data = generate_xml(filtered_papers)
             st.sidebar.download_button(
-                label="🏷️ Download XML (Filtered)",
+                label="🏷️ Download XML",
                 data=xml_data,
-                file_name="curated_literature.xml",
+                file_name=f"{data_source.lower()}_curated_literature.xml",
                 mime="application/xml"
             )
