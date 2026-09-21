@@ -244,21 +244,13 @@ def fetch_ntrs_data(years, limit_per_year):
     all_papers = []
     base_url = "https://ntrs.nasa.gov/api/citations/search"
     
-    # Science Mission Directorate (SMD) broad domain terms
-    smd_science_terms = [
-        "planetary", "exoplanet", "astrobiology", "astrophysics", "earth",
-        "heliophysics", "solar", "geoscience", "atmosphere", "geology", "orbit",
-        "spectroscopy", "biosignature", "galaxy", "stellar", "space science", "climate"
-    ]
-
     for year in years:
-        # NTRS native syntax uses `|` for OR instead of uppercase words
-        query = '"machine learning" | "deep learning" | "neural network" | "artificial intelligence"'
+        # Server-side query combining AI/ML terms and SMD science fields
+        query = '("machine learning" | "deep learning" | "neural network" | "artificial intelligence") AND ("planetary" | "exoplanet" | "astrobiology" | "astrophysics" | "earth science" | "heliophysics" | "lunar" | "mars" | "geoscience")'
         
         params = {
             "q": query,
-            "publicationDateFrom": f"{year}-01-01",
-            "publicationDateTo": f"{year}-12-31"
+            "page.size": 100
         }
         
         try:
@@ -280,11 +272,11 @@ def fetch_ntrs_data(years, limit_per_year):
                     if doc_year != year:
                         continue
                     
-                    combined_text = (clean_title + " " + clean_abstract).lower()
-                    is_science = any(s_kw in combined_text for s_kw in smd_science_terms)
                     keywords = extract_keywords(clean_abstract)
+                    if not keywords:
+                        keywords = extract_keywords(clean_title)
                     
-                    if keywords and is_science:
+                    if keywords:
                         authors = []
                         if "authorAffiliations" in doc and isinstance(doc["authorAffiliations"], list):
                             for auth_item in doc["authorAffiliations"]:
