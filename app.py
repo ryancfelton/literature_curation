@@ -245,7 +245,6 @@ def fetch_ntrs_data(years, limit_per_year):
     base_url = "https://ntrs.nasa.gov/api/citations/search"
     
     for year in years:
-        # Server-side query combining AI/ML terms and SMD science fields
         query = '("machine learning" | "deep learning" | "neural network" | "artificial intelligence") AND ("planetary" | "exoplanet" | "astrobiology" | "astrophysics" | "earth science" | "heliophysics" | "lunar" | "mars" | "geoscience")'
         
         params = {
@@ -297,7 +296,23 @@ def fetch_ntrs_data(years, limit_per_year):
                             
                         ntrs_id = doc.get("id", "N/A")
                         ads_url = f"https://ntrs.nasa.gov/citations/{ntrs_id}" if ntrs_id != "N/A" else "N/A"
-                        pdf_url = f"https://ntrs.nasa.gov/api/citations/{ntrs_id}/downloads/{ntrs_id}.pdf" if ntrs_id != "N/A" else ads_url
+                        
+                        # Dynamically resolve actual PDF file path from NTRS metadata
+                        pdf_url = ads_url
+                        downloads = doc.get("downloads", [])
+                        if isinstance(downloads, list) and len(downloads) > 0:
+                            first_dl = downloads[0]
+                            if isinstance(first_dl, dict):
+                                links = first_dl.get("links", {})
+                                if "pdf" in links and links["pdf"]:
+                                    pdf_path = links["pdf"]
+                                    pdf_url = f"https://ntrs.nasa.gov{pdf_path}" if pdf_path.startswith("/") else pdf_path
+                                elif "download" in links and links["download"]:
+                                    pdf_path = links["download"]
+                                    pdf_url = f"https://ntrs.nasa.gov{pdf_path}" if pdf_path.startswith("/") else pdf_path
+                                elif "name" in first_dl and first_dl["name"]:
+                                    pdf_url = f"https://ntrs.nasa.gov/api/citations/{ntrs_id}/downloads/{first_dl['name']}"
+                        
                         doi = doc.get("doi", "N/A")
                         
                         all_papers.append({
@@ -349,7 +364,7 @@ def generate_pdf(papers, source_name):
         if "arXiv" in paper['source']:
             ref_line = f"arXiv:{paper['arxiv_id']} | Link: {paper['pdf_url']}"
         elif "NTRS" in paper['source']:
-            ref_line = f"NTRS ID: {paper['bibcode']} | Link: {paper['ads_url']}"
+            ref_line = f"NTRS ID: {paper['bibcode']} | Link: {paper['pdf_url']}"
         else:
             ref_line = f"Bibcode: {paper['bibcode']} | Link: {paper['ads_url']}"
             
@@ -438,7 +453,8 @@ if 'papers' in st.session_state:
                     if "arXiv" in p['source']:
                         st.markdown(f"**Reference Info:** arXiv:{p['arxiv_id']} | DOI: {p['doi']} | [PDF Link]({p['pdf_url']})")
                     elif "NTRS" in p['source']:
-                        st.markdown(f"**Reference Info:** NTRS ID: [`{p['bibcode']}`]({p['ads_url']}) | DOI: {p['doi']} | [NTRS Document]({p['pdf_url']})")
+                        doc_label = "[NTRS Document PDF]" if p['pdf_url'] != p['ads_url'] else "[NTRS Record Page]"
+                        st.markdown(f"**Reference Info:** NTRS ID: [`{p['bibcode']}`]({p['ads_url']}) | DOI: {p['doi']} | {doc_label}({p['pdf_url']})")
                     else:
                         st.markdown(f"**Reference Info:** Bibcode: [`{p['bibcode']}`]({p['ads_url']}) | DOI: {p['doi']} | arXiv:{p['arxiv_id']}")
 
